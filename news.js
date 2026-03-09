@@ -7,7 +7,14 @@
 
 const NEWS_API_KEY = 'aa3c72b5c6a749a593b495b0a50c20c4';
 const NEWS_API_BASE = 'https://newsapi.org/v2';
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+// Multiple CORS proxies — try each until one works
+const CORS_PROXIES = [
+    function (url) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url); },
+    function (url) { return 'https://corsproxy.io/?' + encodeURIComponent(url); },
+    function (url) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url); },
+    function (url) { return 'https://thingproxy.freeboard.io/fetch/' + url; }
+];
 
 const newsGrid = document.getElementById('news-grid');
 const newsLoading = document.getElementById('news-loading');
@@ -39,47 +46,54 @@ function timeAgo(dateStr) {
 }
 
 /**
- * Fetch news from NewsAPI with CORS proxy fallback
+ * Try fetching a URL through multiple CORS proxies
+ */
+async function fetchViaProxy(url) {
+    // Attempt direct fetch first (works from localhost)
+    try {
+        const res = await fetch(url);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
+        }
+    } catch (e) {
+        // CORS blocked — try proxies
+    }
+
+    // Try each CORS proxy
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+        try {
+            const proxyUrl = CORS_PROXIES[i](url);
+            const res = await fetch(proxyUrl);
+            if (res.ok) {
+                const text = await res.text();
+                if (text.trim().startsWith('{')) {
+                    const data = JSON.parse(text);
+                    if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
+                }
+            }
+        } catch (e) {
+            // This proxy failed — try next
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Fetch news from NewsAPI with multiple CORS proxy fallbacks
  */
 async function fetchNews(category) {
+    // Try top-headlines endpoint first
     const topHeadlinesUrl = NEWS_API_BASE + '/top-headlines?country=us&category=' + category + '&pageSize=12&apiKey=' + NEWS_API_KEY;
+    const result = await fetchViaProxy(topHeadlinesUrl);
+    if (result) return result;
 
-    // Attempt 1: Direct fetch (works from localhost)
-    try {
-        const res = await fetch(topHeadlinesUrl);
-        if (res.ok) {
-            const data = await res.json();
-            if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
-        }
-    } catch (e) {
-        // CORS blocked — fall through to proxy
-    }
-
-    // Attempt 2: CORS proxy
-    try {
-        const proxyUrl = CORS_PROXY + encodeURIComponent(topHeadlinesUrl);
-        const res = await fetch(proxyUrl);
-        if (res.ok) {
-            const data = await res.json();
-            if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
-        }
-    } catch (e) {
-        // Proxy also failed — try alternative endpoint
-    }
-
-    // Attempt 3: "everything" endpoint via proxy
-    try {
-        const searchTerm = category === 'general' ? 'world news today' : category;
-        const altUrl = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) + '&sortBy=publishedAt&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
-        const proxyUrl = CORS_PROXY + encodeURIComponent(altUrl);
-        const res = await fetch(proxyUrl);
-        if (res.ok) {
-            const data = await res.json();
-            if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
-        }
-    } catch (e) {
-        // All attempts failed
-    }
+    // Fallback: try "everything" endpoint
+    const searchTerm = category === 'general' ? 'world news today' : category;
+    const everythingUrl = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) + '&sortBy=publishedAt&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
+    const result2 = await fetchViaProxy(everythingUrl);
+    if (result2) return result2;
 
     return null;
 }
@@ -113,7 +127,6 @@ function createNewsCard(article, index) {
     card.className = 'news-card';
     card.style.animationDelay = (index * 0.08) + 's';
 
-    // Image
     let imgHtml;
     if (article.urlToImage) {
         imgHtml = '<img class="news-card-img" src="' + escapeAttr(article.urlToImage) +
@@ -122,21 +135,13 @@ function createNewsCard(article, index) {
         imgHtml = '<div class="news-card-img no-image">\uD83D\uDCF0</div>';
     }
 
-    // Meta
     const source = (article.source && article.source.name) ? article.source.name : 'Unknown';
     const time = timeAgo(article.publishedAt);
-
-    // Title (strip " - SourceName" suffix that NewsAPI sometimes appends)
     const rawTitle = article.title || 'Untitled';
     const cleanTitle = rawTitle.replace(/\s*-\s*[^-]+$/, '').trim();
-
-    // Description
     const desc = article.description || '';
-
-    // Text to send to the analyzer
     const analyzeContent = cleanTitle + (desc ? '. ' + desc : '');
 
-    // Read more link
     let readLink = '';
     if (article.url) {
         readLink = '<a class="btn-read-more" href="' + escapeAttr(article.url) +
@@ -184,7 +189,6 @@ function showNewsGrid(articles) {
     newsGrid.classList.remove('hidden');
     newsGrid.innerHTML = '';
 
-    // Filter out removed articles
     const filtered = articles.filter(function (a) {
         return a.title && a.title !== '[Removed]';
     });
@@ -204,17 +208,14 @@ function showNewsGrid(articles) {
             const text = btn.getAttribute('data-text');
             if (!text) return;
 
-            // Reference the analyzer's textarea from the main app.js
             const input = document.getElementById('news-input');
             const counter = document.getElementById('char-count');
 
             input.value = text;
             counter.textContent = text.length + ' character' + (text.length !== 1 ? 's' : '');
 
-            // Scroll to analyzer section
             document.getElementById('analyzer').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-            // Flash the textarea to draw attention
             input.style.boxShadow = '0 0 0 2px rgba(99, 102, 241, 0.5)';
             setTimeout(function () { input.style.boxShadow = ''; }, 1500);
         });
@@ -250,7 +251,6 @@ async function loadNews(category) {
 
 // ===== Event Listeners =====
 
-// Category filter buttons
 categoryFiltersEl.addEventListener('click', function (e) {
     const btn = e.target.closest('.category-btn');
     if (!btn) return;
@@ -263,13 +263,11 @@ categoryFiltersEl.addEventListener('click', function (e) {
     loadNews(btn.getAttribute('data-category'));
 });
 
-// Refresh button
 btnRefresh.addEventListener('click', function () {
     delete newsCache[currentCategory];
     loadNews(currentCategory);
 });
 
-// Retry button
 btnRetry.addEventListener('click', function () {
     delete newsCache[currentCategory];
     loadNews(currentCategory);
@@ -279,13 +277,12 @@ btnRetry.addEventListener('click', function () {
 loadNews('general');
 
 // ===== Auto-refresh every 5 minutes =====
-const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000;
 let refreshTimer = null;
 
 function startAutoRefresh() {
     stopAutoRefresh();
     refreshTimer = setInterval(function () {
-        // Clear cache so we get fresh data
         delete newsCache[currentCategory];
         loadNews(currentCategory);
     }, AUTO_REFRESH_INTERVAL);
@@ -298,15 +295,13 @@ function stopAutoRefresh() {
     }
 }
 
-// Start the auto-refresh timer
 startAutoRefresh();
 
-// Pause auto-refresh when tab is hidden, resume when visible
+// Pause when tab is hidden, resume when visible
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
         stopAutoRefresh();
     } else {
-        // Refresh immediately if cache is stale, then restart timer
         if (!newsCache[currentCategory] || (Date.now() - newsCache[currentCategory].ts >= AUTO_REFRESH_INTERVAL)) {
             delete newsCache[currentCategory];
             loadNews(currentCategory);
