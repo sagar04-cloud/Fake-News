@@ -362,21 +362,24 @@ async function checkLiveNewsMatch(text) {
   // Extract keywords (words longer than 4 chars) to form a query, max 3 words
   const words = text.replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 4);
 
-  if (words.length === 0) return { score: 0, findings: [{ text: 'Text lacks meaningful keywords for verification', type: 'yellow' }] };
+  if (words.length === 0) return { score: 50, findings: [{ text: 'Text lacks meaningful keywords for live verification', type: 'yellow' }] };
 
-  const query = words.slice(0, 3).join(' OR ');
+  // Use AND for stronger verification, but limit to top 3 keywords so it's not too restrictive
+  const query = words.slice(0, 3).join(' AND ');
   const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&sortBy=relevancy&pageSize=3&apiKey=${API_KEY}`;
 
-  let articles = [];
+  let articles = null;
+  let apiError = false;
 
   try {
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
-      articles = data.articles || [];
+      if (data.status === 'ok') articles = data.articles || [];
+      else apiError = true;
     }
   } catch (e) {
-    // Try proxies
+    // Try proxies sequentially
     for (const proxy of PROXIES) {
       try {
         const res = await fetch(proxy(url));
@@ -384,12 +387,26 @@ async function checkLiveNewsMatch(text) {
           const content = await res.text();
           if (content.startsWith('{')) {
             const data = JSON.parse(content);
-            articles = data.articles || [];
-            break;
+            if (data.status === 'ok') {
+              articles = data.articles || [];
+              apiError = false;
+              break;
+            } else {
+              apiError = true;
+            }
           }
         }
       } catch (err) { }
+      if (articles !== null) break;
     }
+  }
+
+  // If the API failed (rate limited, etc), don't punish the headline
+  if (articles === null || apiError) {
+    return {
+      score: 50, // Neutral score
+      findings: [{ text: 'Live verification unavailable (API limit or blocked)', type: 'yellow' }]
+    };
   }
 
   if (articles.length > 0) {
