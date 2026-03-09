@@ -359,52 +359,58 @@ const PROXIES = [
 ];
 
 async function checkLiveNewsMatch(text) {
-  // Extract keywords (words longer than 4 chars) to form a query, max 3 words
-  const words = text.replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 4);
+  if (!text || text.length < 10) return { score: 50, findings: [{ text: 'Text too short for live verification', type: 'yellow' }] };
 
-  if (words.length === 0) return { score: 50, findings: [{ text: 'Text lacks meaningful keywords for live verification', type: 'yellow' }] };
+  // Use the first sentence or up to 100 characters as the query phrase for accuracy
+  let queryPhrase = text.split(/[.!?\n]/)[0].trim().substring(0, 100).replace(/[^\w\s-]/g, '');
+  if (queryPhrase.length === 0) return { score: 50, findings: [{ text: 'Invalid text format for verification', type: 'yellow' }] };
 
-  // Use AND for stronger verification, but limit to top 3 keywords so it's not too restrictive
-  const query = words.slice(0, 3).join(' AND ');
-  const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&sortBy=relevancy&pageSize=3&apiKey=${API_KEY}`;
+  // If it's a short headline, enclose in quotes for exact match. Otherwise, just use the phrase.
+  let isHeadline = queryPhrase.split(' ').length <= 15;
+  let q = isHeadline ? encodeURIComponent(`"${queryPhrase}"`) : encodeURIComponent(queryPhrase);
 
-  let articles = null;
-  let apiError = false;
+  // Create a loose fallback query using keywords
+  const fallbackWords = queryPhrase.split(/\s+/).filter(w => w.length > 4).slice(0, 4);
+  const fallbackQ = encodeURIComponent(fallbackWords.join(' AND '));
 
-  try {
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.status === 'ok') articles = data.articles || [];
-      else apiError = true;
-    }
-  } catch (e) {
-    // Try proxies sequentially
-    for (const proxy of PROXIES) {
-      try {
-        const res = await fetch(proxy(url));
-        if (res.ok) {
-          const content = await res.text();
-          if (content.startsWith('{')) {
-            const data = JSON.parse(content);
-            if (data.status === 'ok') {
-              articles = data.articles || [];
-              apiError = false;
-              break;
-            } else {
-              apiError = true;
+  async function tryFetchNews(query) {
+    const url = `https://newsapi.org/v2/everything?q=${query}&sortBy=relevancy&pageSize=3&apiKey=${API_KEY}`;
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'ok') return data.articles || [];
+      }
+    } catch (e) {
+      for (const proxy of PROXIES) {
+        try {
+          const res = await fetch(proxy(url));
+          if (res.ok) {
+            const content = await res.text();
+            if (content.startsWith('{')) {
+              const data = JSON.parse(content);
+              if (data.status === 'ok') return data.articles || [];
             }
           }
-        }
-      } catch (err) { }
-      if (articles !== null) break;
+        } catch (err) { }
+      }
     }
+    return null;
   }
 
-  // If the API failed (rate limited, etc), don't punish the headline
+  let articles = await tryFetchNews(q); // Try exact match
+  let apiError = false;
+
+  // Fallback to loose AND match if exact match yields nothing
+  if (articles !== null && articles.length === 0 && fallbackWords.length > 0) {
+    articles = await tryFetchNews(fallbackQ);
+  } else if (articles === null) {
+    apiError = true;
+  }
+
   if (articles === null || apiError) {
     return {
-      score: 50, // Neutral score
+      score: 50,
       findings: [{ text: 'Live verification unavailable (API limit or blocked)', type: 'yellow' }]
     };
   }
@@ -412,12 +418,12 @@ async function checkLiveNewsMatch(text) {
   if (articles.length > 0) {
     return {
       score: 100,
-      findings: [{ text: `Live verification: Found ${articles.length} similar reports in real-time news`, type: 'green' }]
+      findings: [{ text: `Live verification: Confirmed! Found ${articles.length} similar reports right now`, type: 'green' }]
     };
   } else {
     return {
       score: 10,
-      findings: [{ text: 'Live verification: Could not find any corroborating news stories online', type: 'red' }]
+      findings: [{ text: 'Live verification: No corroborating news stories found online', type: 'red' }]
     };
   }
 }
@@ -432,31 +438,44 @@ function assessFactuality(text, subScores, isGibberish) {
     return { score: 12, findings: [{ text: 'Input appears to be meaningless text or too short to be news', type: 'red' }] };
   }
 
-  // Weighted average including live verification
-  const weights = {
-    language: 0.10,
-    sensationalism: 0.15,
-    sources: 0.10,
-    emotion: 0.15,
-    logic: 0.10,
-    liveCheck: 0.40 // 40% based on actual real-time news match
-  };
+  let weightedScore = 0;
 
-  const weightedScore = Math.round(
-    subScores.language * weights.language +
-    subScores.sensationalism * weights.sensationalism +
-    subScores.sources * weights.sources +
-    subScores.emotion * weights.emotion +
-    subScores.logic * weights.logic +
-    subScores.liveCheck * weights.liveCheck
-  );
-
-  if (weightedScore >= 70) {
-    findings.push({ text: 'Overall assessment: content appears factual and is supported by live news', type: 'green' });
-  } else if (weightedScore >= 45) {
-    findings.push({ text: 'Overall assessment: content shows red flags or lacks strong live coverage', type: 'yellow' });
-  } else {
-    findings.push({ text: 'Overall assessment: content is highly suspicious and unverified by live news', type: 'red' });
+  // If Live verification explicitly found the article, boost score massively
+  if (subScores.liveCheck === 100) {
+    // Override negative heuristic deductions (like sensationalism or grammar) for real news
+    weightedScore = 85 + Math.round((subScores.language + subScores.sources) * 0.05);
+    findings.push({ text: 'Overall assessment: VERIFIED. Live news corroborates this claim completely!', type: 'green' });
+  }
+  // If Live verification explicitly failed to find it (score 10)
+  else if (subScores.liveCheck === 10) {
+    weightedScore = Math.round(
+      subScores.language * 0.10 +
+      subScores.sensationalism * 0.15 +
+      subScores.sources * 0.15 +
+      subScores.emotion * 0.15 +
+      subScores.logic * 0.15 +
+      subScores.liveCheck * 0.30 // Pulls score heavily down
+    );
+    // Cap at 44 to ensure it is marked Fake News if totally unverified
+    weightedScore = Math.min(weightedScore, 44);
+    findings.push({ text: 'Overall assessment: HIGHLY SUSPICIOUS. Cannot be verified by live news outlets.', type: 'red' });
+  }
+  // API unavailable (score 50), rely purely on heuristics
+  else {
+    weightedScore = Math.round(
+      subScores.language * 0.20 +
+      subScores.sensationalism * 0.25 +
+      subScores.sources * 0.20 +
+      subScores.emotion * 0.20 +
+      subScores.logic * 0.15
+    );
+    if (weightedScore >= 70) {
+      findings.push({ text: 'Overall assessment: content appears factual (Heuristic only, live verification unavailable)', type: 'green' });
+    } else if (weightedScore >= 45) {
+      findings.push({ text: 'Overall assessment: content shows red flags (Heuristic only)', type: 'yellow' });
+    } else {
+      findings.push({ text: 'Overall assessment: content exhibits multiple indicators of misinformation', type: 'red' });
+    }
   }
 
   return { score: weightedScore, findings };
