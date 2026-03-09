@@ -660,8 +660,9 @@ btnAnalyze.addEventListener('click', async () => {
   showLoading();
 
   // Run analysis in the background while showing loading animation
-  const result = analyzeText(text);
+  const resultPromise = analyzeText(text);
   await animateLoadingSteps();
+  const result = await resultPromise;
 
   showResults(result);
   btnAnalyze.disabled = false;
