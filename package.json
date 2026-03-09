@@ -1,0 +1,14 @@
+{
+    "name": "verifact-fake-news-detector",
+    "private": true,
+    "version": "1.0.0",
+    "description": "AI-powered fake news detection with real-time news feed",
+    "scripts": {
+        "dev": "vite",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "devDependencies": {
+        "vite": "^6.2.0"
+    }
+}
