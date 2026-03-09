@@ -277,3 +277,40 @@ btnRetry.addEventListener('click', function () {
 
 // ===== Auto-load news on page load =====
 loadNews('general');
+
+// ===== Auto-refresh every 5 minutes =====
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+let refreshTimer = null;
+
+function startAutoRefresh() {
+    stopAutoRefresh();
+    refreshTimer = setInterval(function () {
+        // Clear cache so we get fresh data
+        delete newsCache[currentCategory];
+        loadNews(currentCategory);
+    }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+}
+
+// Start the auto-refresh timer
+startAutoRefresh();
+
+// Pause auto-refresh when tab is hidden, resume when visible
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+        stopAutoRefresh();
+    } else {
+        // Refresh immediately if cache is stale, then restart timer
+        if (!newsCache[currentCategory] || (Date.now() - newsCache[currentCategory].ts >= AUTO_REFRESH_INTERVAL)) {
+            delete newsCache[currentCategory];
+            loadNews(currentCategory);
+        }
+        startAutoRefresh();
+    }
+});
