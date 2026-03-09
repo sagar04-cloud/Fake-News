@@ -280,6 +280,3 @@ This tool provides **automated heuristic analysis** and should be used alongside
 
 ---
 
-<p align="center">
-  Built with ❤️ using Vite + Vanilla JS
-</p>
