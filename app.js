@@ -339,19 +339,90 @@ function analyzeLogic(text) {
   return { score: Math.max(0, score), findings };
 }
 
+function checkGibberish(text) {
+  const words = text.trim().split(/\s+/);
+  if (words.length < 5) return true; // Too short to be a real news article
+
+  // Check for long strings of consonants or repetitive characters
+  if (/(.)\1{4,}/.test(text)) return true; // Like "hiiii"
+  if (/[bcdfghjklmnpqrstvwxyz]{6,}/i.test(text)) return true; // Like "eajjkkl"
+
+  return false;
+}
+
+// Re-use proxy logic from news.js for real-time verification
+const API_KEY = 'aa3c72b5c6a749a593b495b0a50c20c4';
+const PROXIES = [
+  function (url) { return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url); },
+  function (url) { return 'https://corsproxy.io/?' + encodeURIComponent(url); },
+  function (url) { return 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url); }
+];
+
+async function checkLiveNewsMatch(text) {
+  // Extract keywords (words longer than 4 chars) to form a query, max 3 words
+  const words = text.replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 4);
+
+  if (words.length === 0) return { score: 0, findings: [{ text: 'Text lacks meaningful keywords for verification', type: 'yellow' }] };
+
+  const query = words.slice(0, 3).join(' OR ');
+  const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&sortBy=relevancy&pageSize=3&apiKey=${API_KEY}`;
+
+  let articles = [];
+
+  try {
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      articles = data.articles || [];
+    }
+  } catch (e) {
+    // Try proxies
+    for (const proxy of PROXIES) {
+      try {
+        const res = await fetch(proxy(url));
+        if (res.ok) {
+          const content = await res.text();
+          if (content.startsWith('{')) {
+            const data = JSON.parse(content);
+            articles = data.articles || [];
+            break;
+          }
+        }
+      } catch (err) { }
+    }
+  }
+
+  if (articles.length > 0) {
+    return {
+      score: 100,
+      findings: [{ text: `Live verification: Found ${articles.length} similar reports in real-time news`, type: 'green' }]
+    };
+  } else {
+    return {
+      score: 10,
+      findings: [{ text: 'Live verification: Could not find any corroborating news stories online', type: 'red' }]
+    };
+  }
+}
+
 /**
  * 6. Overall Factual Assessment
  */
-function assessFactuality(text, subScores) {
+function assessFactuality(text, subScores, isGibberish) {
   const findings = [];
 
-  // Weighted average
+  if (isGibberish) {
+    return { score: 12, findings: [{ text: 'Input appears to be meaningless text or too short to be news', type: 'red' }] };
+  }
+
+  // Weighted average including live verification
   const weights = {
-    language: 0.15,
-    sensationalism: 0.20,
-    sources: 0.25,
-    emotion: 0.20,
-    logic: 0.20
+    language: 0.10,
+    sensationalism: 0.15,
+    sources: 0.10,
+    emotion: 0.15,
+    logic: 0.10,
+    liveCheck: 0.40 // 40% based on actual real-time news match
   };
 
   const weightedScore = Math.round(
@@ -359,15 +430,16 @@ function assessFactuality(text, subScores) {
     subScores.sensationalism * weights.sensationalism +
     subScores.sources * weights.sources +
     subScores.emotion * weights.emotion +
-    subScores.logic * weights.logic
+    subScores.logic * weights.logic +
+    subScores.liveCheck * weights.liveCheck
   );
 
   if (weightedScore >= 70) {
-    findings.push({ text: 'Overall assessment: content appears factual and well-written', type: 'green' });
+    findings.push({ text: 'Overall assessment: content appears factual and is supported by live news', type: 'green' });
   } else if (weightedScore >= 45) {
-    findings.push({ text: 'Overall assessment: content shows some red flags but is not definitively fake', type: 'yellow' });
+    findings.push({ text: 'Overall assessment: content shows red flags or lacks strong live coverage', type: 'yellow' });
   } else {
-    findings.push({ text: 'Overall assessment: content exhibits multiple indicators of misinformation', type: 'red' });
+    findings.push({ text: 'Overall assessment: content is highly suspicious and unverified by live news', type: 'red' });
   }
 
   return { score: weightedScore, findings };
@@ -375,22 +447,30 @@ function assessFactuality(text, subScores) {
 
 // ===== Main Analysis Pipeline =====
 
-function analyzeText(text) {
+async function analyzeText(text) {
+  const isGibberish = checkGibberish(text);
+
   const langResult = analyzeLanguage(text);
   const sensResult = detectSensationalism(text);
   const srcResult = checkSources(text);
   const emoResult = detectEmotionalManipulation(text);
   const logicResult = analyzeLogic(text);
 
+  // Real-time news verification (skip if gibberish)
+  const liveResult = isGibberish
+    ? { score: 0, findings: [{ text: 'Skipped live verification due to invalid text', type: 'yellow' }] }
+    : await checkLiveNewsMatch(text);
+
   const subScores = {
     language: langResult.score,
     sensationalism: sensResult.score,
     sources: srcResult.score,
     emotion: emoResult.score,
-    logic: logicResult.score
+    logic: logicResult.score,
+    liveCheck: liveResult.score
   };
 
-  const overallResult = assessFactuality(text, subScores);
+  const overallResult = assessFactuality(text, subScores, isGibberish);
 
   // Determine verdict
   let verdict, verdictClass, confidence;
@@ -405,11 +485,13 @@ function analyzeText(text) {
   } else {
     verdict = 'Fake News';
     verdictClass = 'fake';
-    confidence = Math.min(95, 100 - overallResult.score + Math.round(Math.random() * 5));
+    // If it's gibberish, we are 99% confident it's fake/not news
+    confidence = isGibberish ? 99 : Math.min(95, 100 - overallResult.score + Math.round(Math.random() * 5));
   }
 
   // Collect all findings
   const allFindings = [
+    ...liveResult.findings, // Put live verification first as it's most important
     ...langResult.findings,
     ...sensResult.findings,
     ...srcResult.findings,
@@ -424,6 +506,7 @@ function analyzeText(text) {
     confidence,
     overallScore: overallResult.score,
     breakdown: [
+      { name: 'Live News Verification', desc: 'Real-time crosscheck', score: liveResult.score, icon: '📡' },
       { name: 'Language Quality', desc: 'Writing style & professionalism', score: langResult.score, icon: '🔍' },
       { name: 'Sensationalism', desc: 'Exaggerated or misleading claims', score: sensResult.score, icon: '⚡' },
       { name: 'Source Credibility', desc: 'References & attribution quality', score: srcResult.score, icon: '📎' },
