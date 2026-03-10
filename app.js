@@ -787,7 +787,7 @@ imageUpload.addEventListener('change', async (e) => {
         };
 
         const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -795,7 +795,7 @@ imageUpload.addEventListener('change', async (e) => {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error?.message || "Gemini API Error");
+          throw new Error(errData.error?.message || `API Error ${res.status}`);
         }
         const data = await res.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
