@@ -55,12 +55,20 @@ The analysis engine evaluates text across **six critical dimensions**:
 
 ### 📡 Live News Feed
 
-- Real-time trending headlines from **NewsAPI**
+- **Multi-Language Support** — Support for **English (EN)**, **Hindi (HI)**, and **Kannada (KN)** news feeds
 - **7 category filters**: All, Technology, Health, Science, Business, Sports, Entertainment
 - **"🔍 Analyze This"** button on every article — loads it directly into the analyzer
+- **Smart API Routing**: Automatically switches between **NewsAPI** (EN/HI) and **NewsData.io** (KN)
 - Smart **CORS proxy fallback** chain for reliable fetching on all environments
 - **5-minute caching** to minimize API calls
 - **Refresh** button for fetching latest articles
+
+### 📷 Google Lens Scan (AI Studio)
+
+- **Gemini 2.0 Flash Integration** — Powered by Google's multimodal AI for high-accuracy text extraction
+- **Instant OCR** — Scan physical newspapers or upload screenshots of headlines
+- **Mobile Optimized** — Natively triggers camera on mobile devices for real-time document scanning
+- **Automatic Fact-Checking** — Extracted text is immediately passed through the analysis engine
 
 ### 🎨 Premium UI/UX
 
@@ -83,7 +91,9 @@ The analysis engine evaluates text across **six critical dimensions**:
 | **CSS3** | Custom design system with CSS variables, gradients, glassmorphism |
 | **Vanilla JavaScript** | Analysis engine, DOM manipulation, API integration |
 | **Vite** | Development server, build tool, and HMR |
-| **NewsAPI** | Real-time news headlines |
+| **NewsAPI** | Real-time English & Hindi news headlines |
+| **NewsData.io** | Specialized Kannada news headlines |
+| **Google Gemini** | Multimodal AI for OCR and image analysis (via AI Studio) |
 | **Google Fonts** | Inter & JetBrains Mono typography |
 
 ---
@@ -159,13 +169,13 @@ fake-news-detector/
    npm install
    ```
 
-2. **Configure your API key**
+Open the `.env` file in the root directory and add your API keys:
 
-   Open `news.js` and replace the API key on line 9:
+```bash
+VITE_GEMINI_API_KEY=your_gemini_key_here
+```
 
-   ```javascript
-   const NEWS_API_KEY = 'your_newsapi_key_here';
-   ```
+*Note: For NewsAPI and NewsData.io, keys are managed in `news.js`.*
 
 3. **Start the development server**
 
@@ -199,10 +209,11 @@ This project uses **NewsAPI** for the live news feed.
 
 | Setting | Value |
 |---|---|
-| **API Provider** | [NewsAPI.org](https://newsapi.org) |
-| **Free Tier Limit** | 100 requests/day |
-| **Key Location** | `news.js` → Line 9 |
-| **Endpoints Used** | `/v2/top-headlines` and `/v2/everything` |
+| **Analyzer AI** | [Google Gemini 2.0 Flash](https://aistudio.google.com/) |
+| **English/Hindi Feed** | [NewsAPI.org](https://newsapi.org) |
+| **Kannada Feed** | [NewsData.io](https://newsdata.io) |
+| **Configuration** | Security handled via `.env` (Vite) |
+| **Endpoints Used** | `/generateContent`, `/v2/top-headlines`, `/v1/latest` |
 
 ### CORS Handling
 

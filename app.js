@@ -10,6 +10,9 @@ const newsInput = document.getElementById('news-input');
 const charCount = document.getElementById('char-count');
 const btnAnalyze = document.getElementById('btn-analyze');
 const btnClear = document.getElementById('btn-clear');
+const btnScan = document.getElementById('btn-scan');
+const imageUpload = document.getElementById('image-upload');
+const lensProcessing = document.getElementById('lens-processing');
 const resultsPlaceholder = document.getElementById('results-placeholder');
 const resultsLoading = document.getElementById('results-loading');
 const resultsContent = document.getElementById('results-content');
@@ -742,6 +745,95 @@ btnClear.addEventListener('click', () => {
   charCount.textContent = '0 characters';
   showPlaceholder();
   newsInput.focus();
+});
+
+// Lens / OCR feature
+btnScan.addEventListener('click', () => {
+  imageUpload.click();
+});
+
+imageUpload.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  // Show processing state visually
+  if (lensProcessing) lensProcessing.style.display = 'flex';
+  const originalPlaceholder = newsInput.placeholder;
+  newsInput.value = '';
+  newsInput.placeholder = 'Scanning image and extracting text via OCR... Please wait.';
+  const btnScanText = btnScan.querySelector('.btn-text');
+  if (btnScanText) btnScanText.textContent = 'Scanning...';
+  btnScan.style.opacity = '0.7';
+  btnScan.disabled = true;
+
+  // Jump to the analyzer section so user can see it processing
+  document.getElementById('analyzer').scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const base64Image = event.target.result;
+        const base64Data = base64Image.split(',')[1];
+        const mimeType = base64Image.split(';')[0].split(':')[1];
+
+        const payload = {
+          contents: [{
+            parts: [
+              { text: "Extract all the text from this image exactly as written. Return ONLY the extracted text, no explanation or formatting." },
+              { inline_data: { mime_type: mimeType, data: base64Data } }
+            ]
+          }]
+        };
+
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error?.message || "Gemini API Error");
+        }
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (text && text.trim().length > 0) {
+          newsInput.value = text.trim();
+          const len = newsInput.value.length;
+          charCount.textContent = len + ' character' + (len !== 1 ? 's' : '');
+          // Trigger analysis automatically
+          if (len > 15) btnAnalyze.click();
+        } else {
+          alert("Couldn't extract readable text from the image.");
+        }
+      } catch (err) {
+        console.error("OCR Error:", err);
+        if (err.message.includes('quota') || err.message.includes('429')) {
+          alert("Lens Scan Rate Limit: You've exceeded the AI Studio free quota. Please wait a minute and try again.");
+        } else {
+          alert("Failed to analyze image: " + err.message);
+        }
+      } finally {
+        // Restore ui
+        if (lensProcessing) lensProcessing.style.display = 'none';
+        newsInput.placeholder = originalPlaceholder;
+        if (btnScanText) btnScanText.textContent = 'Start Lens Scan';
+        btnScan.style.opacity = '1';
+        btnScan.disabled = false;
+        imageUpload.value = ''; // allow same image re-upload
+      }
+    };
+    reader.readAsDataURL(file);
+  } catch (e) {
+    if (lensProcessing) lensProcessing.style.display = 'none';
+    newsInput.placeholder = originalPlaceholder;
+    if (btnScanText) btnScanText.textContent = 'Start Lens Scan';
+    btnScan.style.opacity = '1';
+    btnScan.disabled = false;
+  }
 });
 
 btnAnalyze.addEventListener('click', async () => {

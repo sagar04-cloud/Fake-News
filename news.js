@@ -20,10 +20,12 @@ const newsGrid = document.getElementById('news-grid');
 const newsLoading = document.getElementById('news-loading');
 const newsError = document.getElementById('news-error');
 const categoryFiltersEl = document.getElementById('category-filters');
+const languageFiltersEl = document.getElementById('language-filters');
 const btnRefresh = document.getElementById('btn-refresh-news');
 const btnRetry = document.getElementById('btn-retry-news');
 
 let currentCategory = 'general';
+let currentLang = 'en';
 let newsCache = {};
 
 /**
@@ -46,6 +48,23 @@ function timeAgo(dateStr) {
 }
 
 /**
+ * Maps NewsData.io results to the NewsAPI article format
+ */
+function mapNewsData(results) {
+    if (!results) return [];
+    return results.map(function (item) {
+        return {
+            title: item.title,
+            url: item.link,
+            description: item.description,
+            urlToImage: item.image_url,
+            publishedAt: item.pubDate,
+            source: { name: item.source_id || 'NewsData' }
+        };
+    });
+}
+
+/**
  * Try fetching a URL through multiple CORS proxies
  */
 async function fetchViaProxy(url) {
@@ -55,6 +74,7 @@ async function fetchViaProxy(url) {
         if (res.ok) {
             const data = await res.json();
             if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
+            if (data.status === 'success' && data.results && data.results.length > 0) return mapNewsData(data.results);
         }
     } catch (e) {
         // CORS blocked — try proxies
@@ -70,6 +90,7 @@ async function fetchViaProxy(url) {
                 if (text.trim().startsWith('{')) {
                     const data = JSON.parse(text);
                     if (data.status === 'ok' && data.articles && data.articles.length > 0) return data.articles;
+                    if (data.status === 'success' && data.results && data.results.length > 0) return mapNewsData(data.results);
                 }
             }
         } catch (e) {
@@ -83,14 +104,32 @@ async function fetchViaProxy(url) {
 /**
  * Fetch news from NewsAPI with multiple CORS proxy fallbacks
  */
-async function fetchNews(category) {
+async function fetchNews(category, lang) {
+    // If language is Kannada, use the special NewsData API instead of NewsAPI
+    if (lang === 'kn') {
+        const query = category === 'general' ? '' : '&q=' + encodeURIComponent(category);
+        const newsdataUrl = 'https://newsdata.io/api/1/latest?apikey=pub_39cbc54c45404b2684e33b692932588c&language=kn' + query;
+        const result = await fetchViaProxy(newsdataUrl);
+        if (result) return result;
+        return null;
+    }
+
     // Build the query
-    const searchTerm = category === 'general' ? 'world news today' : category;
+    let searchTerm = category === 'general' ? 'news' : category;
+
+    // NewsAPI has limited support for Hindi (hi). We append native keywords for reliable results.
+    let langParam = '';
+    if (lang === 'hi') {
+        searchTerm += ' समाचार'; // "news" in Hindi
+    } else {
+        langParam = '&language=en';
+        searchTerm = category === 'general' ? 'world news today' : category;
+    }
 
     // Use the "everything" endpoint to guarantee we get news, 
     // sorting by publishedAt to fetch the absolute latest articles.
     const url = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) +
-        '&sortBy=publishedAt&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
+        '&sortBy=publishedAt&pageSize=12' + langParam + '&apiKey=' + NEWS_API_KEY;
 
     const result = await fetchViaProxy(url);
     if (result) return result;
@@ -227,16 +266,17 @@ function showNewsGrid(articles) {
  */
 async function loadNews(category) {
     currentCategory = category || 'general';
+    const cacheKey = currentCategory + '-' + currentLang;
 
     showNewsLoading();
     btnRefresh.classList.add('spinning');
 
-    const articles = await fetchNews(currentCategory);
+    const articles = await fetchNews(currentCategory, currentLang);
 
     btnRefresh.classList.remove('spinning');
 
     if (articles && articles.length > 0) {
-        newsCache[currentCategory] = { data: articles, ts: Date.now() };
+        newsCache[cacheKey] = { data: articles, ts: Date.now() };
         showNewsGrid(articles);
     } else {
         showNewsError();
@@ -257,13 +297,30 @@ categoryFiltersEl.addEventListener('click', function (e) {
     loadNews(btn.getAttribute('data-category'));
 });
 
+if (languageFiltersEl) {
+    languageFiltersEl.addEventListener('click', function (e) {
+        const btn = e.target.closest('.lang-btn');
+        if (!btn) return;
+
+        languageFiltersEl.querySelectorAll('.lang-btn').forEach(function (b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+
+        currentLang = btn.getAttribute('data-lang');
+        loadNews(currentCategory);
+    });
+}
+
 btnRefresh.addEventListener('click', function () {
-    delete newsCache[currentCategory];
+    const cacheKey = currentCategory + '-' + currentLang;
+    delete newsCache[cacheKey];
     loadNews(currentCategory);
 });
 
 btnRetry.addEventListener('click', function () {
-    delete newsCache[currentCategory];
+    const cacheKey = currentCategory + '-' + currentLang;
+    delete newsCache[cacheKey];
     loadNews(currentCategory);
 });
 
@@ -277,7 +334,8 @@ let refreshTimer = null;
 function startAutoRefresh() {
     stopAutoRefresh();
     refreshTimer = setInterval(function () {
-        delete newsCache[currentCategory];
+        const cacheKey = currentCategory + '-' + currentLang;
+        delete newsCache[cacheKey];
         loadNews(currentCategory);
     }, AUTO_REFRESH_INTERVAL);
 }
@@ -296,8 +354,9 @@ document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
         stopAutoRefresh();
     } else {
-        if (!newsCache[currentCategory] || (Date.now() - newsCache[currentCategory].ts >= AUTO_REFRESH_INTERVAL)) {
-            delete newsCache[currentCategory];
+        const cacheKey = currentCategory + '-' + currentLang;
+        if (!newsCache[cacheKey] || (Date.now() - newsCache[cacheKey].ts >= AUTO_REFRESH_INTERVAL)) {
+            delete newsCache[cacheKey];
             loadNews(currentCategory);
         }
         startAutoRefresh();
