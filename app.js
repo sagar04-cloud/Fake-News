@@ -361,19 +361,42 @@ const PROXIES = [
 async function checkLiveNewsMatch(text) {
   if (!text || text.length < 10) return { score: 50, findings: [{ text: 'Text too short for live verification', type: 'yellow' }] };
 
-  // Use the first sentence or up to 100 characters as the query phrase for accuracy
-  let queryPhrase = text.split(/[.!?\n]/)[0].trim().substring(0, 100).replace(/[^\w\s-]/g, '');
-  if (queryPhrase.length === 0) return { score: 50, findings: [{ text: 'Invalid text format for verification', type: 'yellow' }] };
+  const rawWords = text.trim().split(/\s+/);
 
-  // If it's a short headline, enclose in quotes for exact match. Otherwise, just use the phrase.
-  let isHeadline = queryPhrase.split(' ').length <= 15;
-  let q = isHeadline ? encodeURIComponent(`"${queryPhrase}"`) : encodeURIComponent(queryPhrase);
+  // 1. Try an exact phrase match if it's a short headline
+  let qHeadline = null;
+  if (rawWords.length <= 15) {
+    const cleanHeadline = text.replace(/[^\w\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+    qHeadline = encodeURIComponent(`"${cleanHeadline}"`);
+  }
 
-  // Create a loose fallback query using keywords
-  const fallbackWords = queryPhrase.split(/\s+/).filter(w => w.length > 4).slice(0, 4);
-  const fallbackQ = encodeURIComponent(fallbackWords.join(' AND '));
+  // 2. Keyword extraction across the FULL text for fallback queries
+  const stopWords = [
+    'about', 'after', 'again', 'against', 'because', 'been', 'before', 'being', 'between', 'could',
+    'down', 'during', 'from', 'further', 'given', 'having', 'here', 'into', 'just', 'more', 'most',
+    'only', 'other', 'over', 'some', 'such', 'that', 'then', 'there', 'these', 'they', 'this', 'those',
+    'through', 'under', 'until', 'very', 'were', 'what', 'when', 'where', 'which', 'while', 'whom',
+    'with', 'would', 'your', 'will', 'have', 'their', 'said', 'says', 'told', 'than', 'according',
+    'published', 'new', 'has', 'had', 'are', 'was', 'did', 'does', 'not'
+  ];
+
+  let validKeywords = rawWords
+    .map(w => w.replace(/[^\w-]/g, ''))
+    .filter(w => w.length > 3) // Exclude tiny words
+    .filter(w => !stopWords.includes(w.toLowerCase()));
+
+  // Prioritize capitalized words (likely proper nouns like "Google", "Trump", "NASA")
+  let capitals = validKeywords.filter(w => /^[A-Z]/.test(w));
+  let lowers = validKeywords.filter(w => !/^[A-Z]/.test(w));
+  let uniqueKeywords = [...new Set([...capitals, ...lowers])];
+
+  // Try 6 specific keywords (very tight match for detailed articles)
+  const qTop6 = encodeURIComponent(uniqueKeywords.slice(0, 6).join(' AND '));
+  // Try 3 specific keywords (broader match, captures core entities)
+  const qTop3 = encodeURIComponent(uniqueKeywords.slice(0, 3).join(' AND '));
 
   async function tryFetchNews(query) {
+    if (!query || query === "") return null;
     const url = `https://newsapi.org/v2/everything?q=${query}&sortBy=relevancy&pageSize=3&apiKey=${API_KEY}`;
     try {
       const res = await fetch(url);
@@ -398,32 +421,73 @@ async function checkLiveNewsMatch(text) {
     return null;
   }
 
-  let articles = await tryFetchNews(q); // Try exact match
+  let articles = null;
   let apiError = false;
 
-  // Fallback to loose AND match if exact match yields nothing
-  if (articles !== null && articles.length === 0 && fallbackWords.length > 0) {
-    articles = await tryFetchNews(fallbackQ);
-  } else if (articles === null) {
-    apiError = true;
+  // Progressive Search Pipeline:
+  // Try Exact Headline First (if applicable)
+  if (qHeadline) {
+    articles = await tryFetchNews(qHeadline);
   }
 
-  if (articles === null || apiError) {
+  // Fallback 1: Try full-word 6-keyword strict match
+  if ((!articles || articles.length === 0) && uniqueKeywords.length >= 4) {
+    articles = await tryFetchNews(qTop6);
+  }
+
+  // Fallback 2: Try broader 3-keyword match (captures core entities)
+  if ((!articles || articles.length === 0) && uniqueKeywords.length >= 1) {
+    articles = await tryFetchNews(qTop3);
+  }
+
+  if (articles === null) apiError = true;
+
+  if (apiError) {
     return {
       score: 50,
       findings: [{ text: 'Live verification unavailable (API limit or blocked)', type: 'yellow' }]
     };
   }
 
-  if (articles.length > 0) {
+  // Deep Verification: Analyze the FULL words to ensure the returned articles actually match the claim
+  let validMatches = 0;
+  if (articles && articles.length > 0) {
+    for (const article of articles) {
+      const articleText = ((article.title || '') + ' ' + (article.description || '')).toLowerCase();
+      // Extract words from article
+      const articleWords = new Set(articleText.replace(/[^\w-]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+
+      let matchCount = 0;
+      for (const kw of uniqueKeywords) {
+        if (articleText.includes(kw.toLowerCase())) {
+          matchCount++;
+        }
+      }
+
+      // Calculate overlap percentage (require at least 40% of input's core keywords to be present, or 3+ keywords)
+      const matchRatio = matchCount / Math.max(uniqueKeywords.length, 1);
+
+      if (matchRatio >= 0.40 || matchCount >= 4 || (qHeadline && matchCount >= 2)) {
+        validMatches++;
+      }
+    }
+  }
+
+  if (validMatches > 0) {
     return {
       score: 100,
-      findings: [{ text: `Live verification: Confirmed! Found ${articles.length} similar reports right now`, type: 'green' }]
+      findings: [{ text: `Live verification: Confirmed! Found ${validMatches} highly similar news reports right now`, type: 'green' }]
+    };
+  } else if (articles && articles.length > 0) {
+    // The API found articles for the terms, but the detailed context did not match our deep verification
+    return {
+      score: 20,
+      findings: [{ text: 'Live verification: Fetched related topics, but full article context drastically differs from input', type: 'red' }]
     };
   } else {
     return {
       score: 10,
-      findings: [{ text: 'Live verification: No corroborating news stories found online', type: 'red' }]
+      findings: [{ text: 'Live verification: No corroborating news stories found for these keywords', type: 'red' }]
     };
   }
 }

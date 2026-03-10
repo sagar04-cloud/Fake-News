@@ -84,16 +84,23 @@ async function fetchViaProxy(url) {
  * Fetch news from NewsAPI with multiple CORS proxy fallbacks
  */
 async function fetchNews(category) {
-    // Try top-headlines endpoint first
-    const topHeadlinesUrl = NEWS_API_BASE + '/top-headlines?country=us&category=' + category + '&pageSize=12&apiKey=' + NEWS_API_KEY;
-    const result = await fetchViaProxy(topHeadlinesUrl);
-    if (result) return result;
+    // Get today's date formatted as YYYY-MM-DD
+    const today = new Date();
+    // Go back 1 day just to ensure we get enough articles across timezones
+    today.setDate(today.getDate() - 1);
+    const fromDate = today.toISOString().split('T')[0];
 
-    // Fallback: try "everything" endpoint
+    // Build the query
     const searchTerm = category === 'general' ? 'world news today' : category;
-    const everythingUrl = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) + '&sortBy=publishedAt&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
-    const result2 = await fetchViaProxy(everythingUrl);
-    if (result2) return result2;
+
+    // Use the "everything" endpoint to guarantee we get *today's* news, 
+    // and correctly apply both language and relevancy to bypass caching issues.
+    const url = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) +
+        '&from=' + fromDate +
+        '&sortBy=relevancy&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
+
+    const result = await fetchViaProxy(url);
+    if (result) return result;
 
     return null;
 }
@@ -227,12 +234,6 @@ function showNewsGrid(articles) {
  */
 async function loadNews(category) {
     currentCategory = category || 'general';
-
-    // Check cache (valid for 5 minutes)
-    if (newsCache[currentCategory] && (Date.now() - newsCache[currentCategory].ts < 300000)) {
-        showNewsGrid(newsCache[currentCategory].data);
-        return;
-    }
 
     showNewsLoading();
     btnRefresh.classList.add('spinning');
