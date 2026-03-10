@@ -773,29 +773,44 @@ imageUpload.addEventListener('change', async (e) => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const formData = new FormData();
-        formData.append('media', file);
-        formData.append('models', 'text');
+        const base64Image = event.target.result;
 
-        const apiUser = import.meta.env.VITE_SIGHTENGINE_API_USER;
-        const apiSecret = import.meta.env.VITE_SIGHTENGINE_API_SECRET;
+        const payload = {
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Extract all the text from this image exactly as written. Return ONLY the extracted text, no explanation or formatting." },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: base64Image
+                  }
+                }
+              ]
+            }
+          ]
+        };
 
-        if (apiUser) formData.append('api_user', apiUser);
-        if (apiSecret) formData.append('api_secret', apiSecret);
-
-        const res = await fetch('https://api.sightengine.com/1.0/check.json', {
+        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          body: formData
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiKey
+          },
+          body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `Sightengine API Error ${res.status}`);
+          throw new Error(errData.error?.message || `OpenAI API Error ${res.status}`);
         }
         const data = await res.json();
 
-        // Sightengine text OCR returns the text string inside data.text.text
-        const text = data.text?.text || data.text?.content || '';
+        // Extract text from OpenAI response
+        const text = data.choices?.[0]?.message?.content || '';
 
         if (text && text.trim().length > 0) {
           newsInput.value = text.trim();
