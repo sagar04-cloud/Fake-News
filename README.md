@@ -159,7 +159,7 @@ fake-news-detector/
 
 - [Node.js](https://nodejs.org/) v18 or higher
 - [npm](https://www.npmjs.com/) (comes with Node.js)
-- A free [NewsAPI](https://newsapi.org) API key
+- A [NewsAPI](https://newsapi.org) API key
 
 ### Installation
 
@@ -217,7 +217,7 @@ This project uses **NewsAPI** for the live news feed.
 
 ### CORS Handling
 
-NewsAPI's free tier blocks browser requests from production domains. The app uses a **3-tier fallback strategy**:
+NewsAPI blocks certain browser requests from production domains. The app uses a **3-tier fallback strategy**:
 
 1. **Direct Fetch** — Works on `localhost` during development
 2. **CORS Proxy** (`api.allorigins.win`) — Handles production deployments
