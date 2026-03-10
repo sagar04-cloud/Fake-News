@@ -773,32 +773,29 @@ imageUpload.addEventListener('change', async (e) => {
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const base64Image = event.target.result;
-        const base64Data = base64Image.split(',')[1];
-        const mimeType = base64Image.split(';')[0].split(':')[1];
+        const formData = new FormData();
+        formData.append('media', file);
+        formData.append('models', 'text');
 
-        const payload = {
-          contents: [{
-            parts: [
-              { text: "Extract all the text from this image exactly as written. Return ONLY the extracted text, no explanation or formatting." },
-              { inline_data: { mime_type: mimeType, data: base64Data } }
-            ]
-          }]
-        };
+        const apiUser = import.meta.env.VITE_SIGHTENGINE_API_USER;
+        const apiSecret = import.meta.env.VITE_SIGHTENGINE_API_SECRET;
 
-        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+        if (apiUser) formData.append('api_user', apiUser);
+        if (apiSecret) formData.append('api_secret', apiSecret);
+
+        const res = await fetch('https://api.sightengine.com/1.0/check.json', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: formData
         });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `API Error ${res.status}`);
+          throw new Error(errData.error?.message || `Sightengine API Error ${res.status}`);
         }
         const data = await res.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        // Sightengine text OCR returns the text string inside data.text.text
+        const text = data.text?.text || data.text?.content || '';
 
         if (text && text.trim().length > 0) {
           newsInput.value = text.trim();
@@ -811,11 +808,7 @@ imageUpload.addEventListener('change', async (e) => {
         }
       } catch (err) {
         console.error("OCR Error:", err);
-        if (err.message.includes('quota') || err.message.includes('429')) {
-          alert("Lens Scan Rate Limit: You've exceeded the AI Studio free quota. Please wait a minute and try again.");
-        } else {
-          alert("Failed to analyze image: " + err.message);
-        }
+        alert("Failed to analyze image: " + err.message);
       } finally {
         // Restore ui
         if (lensProcessing) lensProcessing.style.display = 'none';
@@ -826,7 +819,7 @@ imageUpload.addEventListener('change', async (e) => {
         imageUpload.value = ''; // allow same image re-upload
       }
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(file); // keeping this incase we need data URL preview later, though file is directly uploaded
   } catch (e) {
     if (lensProcessing) lensProcessing.style.display = 'none';
     newsInput.placeholder = originalPlaceholder;
