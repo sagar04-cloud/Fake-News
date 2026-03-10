@@ -153,20 +153,13 @@ fake-news-detector/
 
 ### Installation
 
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/fake-news-detector.git
-   cd fake-news-detector
-   ```
-
-2. **Install dependencies**
+1. **Install dependencies**
 
    ```bash
    npm install
    ```
 
-3. **Configure your API key**
+2. **Configure your API key**
 
    Open `news.js` and replace the API key on line 9:
 
@@ -174,13 +167,13 @@ fake-news-detector/
    const NEWS_API_KEY = 'your_newsapi_key_here';
    ```
 
-4. **Start the development server**
+3. **Start the development server**
 
    ```bash
    npm run dev
    ```
 
-5. **Open in browser**
+4. **Open in browser**
 
    Visit `http://localhost:5173` — the app will open automatically.
 
@@ -287,6 +280,3 @@ This tool provides **automated heuristic analysis** and should be used alongside
 
 ---
 
-<p align="center">
-  Built with ❤️ using Vite + Vanilla JS
-</p>
