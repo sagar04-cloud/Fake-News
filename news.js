@@ -84,20 +84,13 @@ async function fetchViaProxy(url) {
  * Fetch news from NewsAPI with multiple CORS proxy fallbacks
  */
 async function fetchNews(category) {
-    // Get today's date formatted as YYYY-MM-DD
-    const today = new Date();
-    // Go back 1 day just to ensure we get enough articles across timezones
-    today.setDate(today.getDate() - 1);
-    const fromDate = today.toISOString().split('T')[0];
-
     // Build the query
     const searchTerm = category === 'general' ? 'world news today' : category;
 
-    // Use the "everything" endpoint to guarantee we get *today's* news, 
-    // and correctly apply both language and relevancy to bypass caching issues.
+    // Use the "everything" endpoint to guarantee we get news, 
+    // sorting by publishedAt to fetch the absolute latest articles.
     const url = NEWS_API_BASE + '/everything?q=' + encodeURIComponent(searchTerm) +
-        '&from=' + fromDate +
-        '&sortBy=relevancy&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
+        '&sortBy=publishedAt&pageSize=12&language=en&apiKey=' + NEWS_API_KEY;
 
     const result = await fetchViaProxy(url);
     if (result) return result;
