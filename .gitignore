@@ -11,9 +11,8 @@ Thumbs.db
 # IDE files
 .vscode/
 .idea/
-
-# Vercel
-.vercel/
-
-# Logs
 *.log
+
+# Environment variables
+.env
+.env.*

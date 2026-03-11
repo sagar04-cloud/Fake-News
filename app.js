@@ -452,6 +452,7 @@ async function checkLiveNewsMatch(text) {
 
   // Deep Verification: Analyze the FULL words to ensure the returned articles actually match the claim
   let validMatches = 0;
+  let validArticles = [];
   if (articles && articles.length > 0) {
     for (const article of articles) {
       const articleText = ((article.title || '') + ' ' + (article.description || '')).toLowerCase();
@@ -470,25 +471,44 @@ async function checkLiveNewsMatch(text) {
 
       if (matchRatio >= 0.40 || matchCount >= 4 || (qHeadline && matchCount >= 2)) {
         validMatches++;
+        validArticles.push(article);
       }
     }
   }
 
   if (validMatches > 0) {
+    let findings = [{ text: `Live verification: Confirmed! Found ${validMatches} highly similar news reports right now`, type: 'green' }];
+
+    // Add articles to findings
+    validArticles.slice(0, 3).forEach(article => {
+      const sourceName = article.source?.name || 'News Platform';
+      findings.push({
+        text: `Source found: <a href="${article.url}" target="_blank" style="color: var(--accent-cyan); text-decoration: underline;">${sourceName}</a> - ${article.title}`,
+        type: 'blue',
+        isHtml: true
+      });
+    });
+
     return {
       score: 100,
-      findings: [{ text: `Live verification: Confirmed! Found ${validMatches} highly similar news reports right now`, type: 'green' }]
+      findings: findings
     };
   } else if (articles && articles.length > 0) {
     // The API found articles for the terms, but the detailed context did not match our deep verification
     return {
       score: 20,
-      findings: [{ text: 'Live verification: Fetched related topics, but full article context drastically differs from input', type: 'red' }]
+      findings: [
+        { text: 'Live verification: Fetched related topics, but full article context drastically differs from input', type: 'red' },
+        { text: 'Reason: No reputable online news channels or platforms are corroborating this exact story. This is a very strong indicator of unverified claims or fake news.', type: 'red' }
+      ]
     };
   } else {
     return {
       score: 10,
-      findings: [{ text: 'Live verification: No corroborating news stories found for these keywords', type: 'red' }]
+      findings: [
+        { text: 'Live verification: No corroborating news stories found for these keywords', type: 'red' },
+        { text: 'Reason: The complete absence of this information on real news outlets strongly suggests it is fabricated.', type: 'red' }
+      ]
     };
   }
 }
@@ -725,7 +745,7 @@ function showResults(result) {
 
     li.innerHTML = `
       <span class="finding-bullet ${bulletClass}"></span>
-      <span>${f.text}</span>
+      <span>${f.isHtml ? f.text : f.text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>
     `;
     findingsList.appendChild(li);
   });
@@ -744,8 +764,6 @@ btnClear.addEventListener('click', () => {
   showPlaceholder();
   newsInput.focus();
 });
-
-
 
 btnAnalyze.addEventListener('click', async () => {
   const text = newsInput.value.trim();
